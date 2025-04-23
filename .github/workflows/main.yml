@@ -181,8 +181,8 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.artifact.outputs.name }}-${{ github.run_number }}
-          name: ${{ steps.artifact.outputs.name }} build ${{ github.run_number }}
+          tag_name: ${{ steps.artifact.outputs.name }}
+          name: ${{ steps.artifact.outputs.name }}
           draft: false
           prerelease: false
           files: deploy/*.zip
