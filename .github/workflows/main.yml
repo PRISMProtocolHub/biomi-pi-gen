@@ -1,5 +1,8 @@
 name: BIOMI-OS-IMAGE-BUILDER
 
+env:
+  wifi_country: "FR"
+
 on:
   workflow_dispatch:
     inputs:
@@ -43,14 +46,6 @@ on:
         required: true
         default: 'raspberry'
         type: string
-      enable_wifi:
-        description: 'Enable WiFi configuration'
-        required: true
-        default: '0'
-        type: choice
-        options:
-          - '0'
-          - '1'
       wifi_ssid:
         description: 'WiFi SSID (network name)'
         required: false
@@ -58,11 +53,6 @@ on:
       wifi_password:
         description: 'WiFi Password'
         required: false
-        type: string
-      wifi_country:
-        description: 'WiFi Country Code (FR, US, GB, etc.)'
-        required: false
-        default: 'FR'
         type: string
       custom_packages:
         description: 'Additional packages to install (space-separated)'
@@ -112,17 +102,16 @@ jobs:
           USE_QEMU=${{ inputs.use_qemu }}
           WPA_ESSID="${{ inputs.wifi_ssid }}"
           WPA_PASSWORD="${{ inputs.wifi_password }}"
-          WPA_COUNTRY="${{ inputs.wifi_country }}"
           EOF
 
       - name: Configure WiFi
-        if: "${{ inputs.enable_wifi == '1' && inputs.wifi_ssid != '' && inputs.wifi_password != '' }}"
+        if: "${{ inputs.wifi_ssid != '' && inputs.wifi_password != '' }}"
         run: |
           mkdir -p ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/files/etc/wpa_supplicant
           cat > ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/files/etc/wpa_supplicant/wpa_supplicant.conf << EOF
           ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
           update_config=1
-          country=${{ inputs.wifi_country }}
+          country=${{ env.wifi_country }}
           
           network={
             ssid="${{ inputs.wifi_ssid }}"
@@ -144,12 +133,12 @@ jobs:
           
           # Configure country code
           if [ -e /etc/default/crda ]; then
-            sed -i "s/^REGDOMAIN=.*/REGDOMAIN=${{ inputs.wifi_country }}/" /etc/default/crda
+            sed -i "s/^REGDOMAIN=.*/REGDOMAIN=${{ env.wifi_country }}/" /etc/default/crda
           fi
           
           # Enable WiFi on boot (for bookworm and newer)
           if [ -e /etc/default/raspi-firmware ]; then
-            sed -i "s/^#WIRELESS_REGDOM=.*/WIRELESS_REGDOM=${{ inputs.wifi_country }}/" /etc/default/raspi-firmware
+            sed -i "s/^#WIRELESS_REGDOM=.*/WIRELESS_REGDOM=${{ env.wifi_country }}/" /etc/default/raspi-firmware
           fi
           EOT
           EOF
