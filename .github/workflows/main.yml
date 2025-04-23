@@ -1,0 +1,196 @@
+name: BIOMI-OS-IMAGE-BUILDER
+
+env:
+  wifi_country: "FR"
+
+on:
+  workflow_dispatch:
+    inputs:
+      install_dev_packages:
+        description: 'Install development packages'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+      use_qemu:
+        description: 'Use QEMU compatibility for emulation'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+      hostname:
+        description: 'Hostname for the image'
+        required: true
+        default: 'raspberrypi'
+        type: string
+      public_key:
+        description: 'SSH Public Key'
+        required: false
+        type: string
+      username:
+        description: 'Default username'
+        required: true
+        default: 'pi'
+        type: string
+      password:
+        description: 'Default password'
+        required: true
+        default: 'raspberry'
+        type: string
+      wifi_ssid:
+        description: 'WiFi SSID (network name)'
+        required: false
+        type: string
+      wifi_password:
+        description: 'WiFi Password'
+        required: false
+        type: string
+      custom_packages:
+        description: 'Additional packages to install (space-separated)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on:
+      labels: arm64-runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install coreutils quilt parted qemu-user-static debootstrap zerofree zip \
+          dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc \
+          gpg pigz xxd arch-test bmap-tools
+
+      - name: Create build directory
+        run: mkdir -p ${GITHUB_WORKSPACE}/deploy
+
+      - name: Create custom package list
+        if: "${{ inputs.custom_packages != '' }}"
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/custom/00-packages
+          echo "${{ inputs.custom_packages }}" | tr ' ' '\n' > ${GITHUB_WORKSPACE}/custom/00-packages/00-packages
+
+      - name: Create config file
+        run: |
+          RELEASE_NAME="bullseye"
+          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
+            RELEASE_NAME="bullseye-dev"
+          fi
+          
+          cat > ${GITHUB_WORKSPACE}/config << EOF
+          IMG_NAME="${RELEASE_NAME}"
+          RELEASE="${{ inputs.release }}"
+          DEPLOY_ZIP=1
+          LOCALE_DEFAULT="fr_FR.UTF-8"
+          TARGET_HOSTNAME="${{ inputs.hostname }}"
+          KEYBOARD_KEYMAP="fr"
+          KEYBOARD_LAYOUT="French"
+          TIMEZONE_DEFAULT="Europe/Paris"
+          FIRST_USER_NAME="${{ inputs.username }}"
+          FIRST_USER_PASS="${{ inputs.password }}"
+          ENABLE_SSH=1
+          STAGE_LIST="stage0 stage1 stage2"
+          ARCH="arm64"
+          INSTALL_DEV_PACKAGES="${{ inputs.install_dev_packages }}"
+          USE_QEMU="${{ inputs.use_qemu }}"
+          WPA_ESSID="${{ inputs.wifi_ssid }}"
+          WPA_PASSWORD="${{ inputs.wifi_password }}"
+          PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
+          EOF
+
+      - name: Configure WiFi
+        if: "${{ inputs.wifi_ssid != '' && inputs.wifi_password != '' }}"
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/files/etc/wpa_supplicant
+          cat > ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/files/etc/wpa_supplicant/wpa_supplicant.conf << EOF
+          ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+          update_config=1
+          country=${{ env.wifi_country }}
+          
+          network={
+            ssid="${{ inputs.wifi_ssid }}"
+            psk="${{ inputs.wifi_password }}"
+            key_mgmt=WPA-PSK
+          }
+          EOF
+          
+          # Create run script to copy WPA config if it doesn't exist
+          mkdir -p ${GITHUB_WORKSPACE}/stage2/02-net-tweaks
+          cat > ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/01-run.sh << 'EOF'
+          #!/bin/bash -e
+          
+          install -m 644 files/etc/wpa_supplicant/wpa_supplicant.conf "${ROOTFS_DIR}/etc/wpa_supplicant/"
+          
+          on_chroot << EOT
+          # Enable WiFi on boot
+          systemctl enable wpa_supplicant.service
+          
+          # Configure country code
+          if [ -e /etc/default/crda ]; then
+            sed -i "s/^REGDOMAIN=.*/REGDOMAIN=${{ env.wifi_country }}/" /etc/default/crda
+          fi
+          
+          # Enable WiFi on boot (for bookworm and newer)
+          if [ -e /etc/default/raspi-firmware ]; then
+            sed -i "s/^#WIRELESS_REGDOM=.*/WIRELESS_REGDOM=${{ env.wifi_country }}/" /etc/default/raspi-firmware
+          fi
+          EOT
+          EOF
+          
+          chmod +x ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/01-run.sh
+
+      - name: Build Image
+        run: |
+          sudo modprobe loop
+          docker pull debian:bullseye
+          DOCKER_BUILDKIT=1 ./build-docker.sh
+        env:
+          CONTINUE: 1
+          PRESERVE_CONTAINER: 0
+
+      - name: Create artifact name
+        id: artifact
+        run: |
+          ARTIFACT_NAME="biomi-os-bullseye-arm64"
+          echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: deploy/*.zip
+          retention-days: 7
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.artifact.outputs.name }}-${{ github.run_number }}
+          name: ${{ steps.artifact.outputs.name }} build ${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: deploy/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo rm -rf work
+          sudo rm -rf deploy
