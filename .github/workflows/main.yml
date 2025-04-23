@@ -12,16 +12,16 @@ on:
           - bullseye
           - bookworm
           - buster
-      architecture:
-        description: 'Target architecture'
-        required: true
-        default: 'arm64'
-        type: choice
-        options:
-          - arm64
-          - armhf
       install_dev_packages:
         description: 'Install development packages'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+      use_qemu:
+        description: 'Use QEMU compatibility for emulation'
         required: true
         default: '0'
         type: choice
@@ -43,25 +43,6 @@ on:
         required: true
         default: 'raspberry'
         type: string
-      locale:
-        description: 'Default locale'
-        required: true
-        default: 'fr_FR.UTF-8'
-        type: string
-      timezone:
-        description: 'Default timezone'
-        required: true
-        default: 'Europe/Paris'
-        type: string
-      stage_list:
-        description: 'Stages to build (space-separated)'
-        required: true
-        default: 'stage0 stage1 stage2'
-        type: string
-      custom_packages:
-        description: 'Additional packages to install (space-separated)'
-        required: false
-        type: string
       enable_wifi:
         description: 'Enable WiFi configuration'
         required: true
@@ -82,6 +63,10 @@ on:
         description: 'WiFi Country Code (FR, US, GB, etc.)'
         required: false
         default: 'FR'
+        type: string
+      custom_packages:
+        description: 'Additional packages to install (space-separated)'
+        required: false
         type: string
 
 jobs:
@@ -110,20 +95,21 @@ jobs:
       - name: Create config file
         run: |
           cat > ${GITHUB_WORKSPACE}/config << EOF
-          IMG_NAME="${{ inputs.hostname }}-${{ inputs.release }}-${{ inputs.architecture }}"
+          IMG_NAME="${{ inputs.hostname }}-${{ inputs.release }}"
           RELEASE="${{ inputs.release }}"
           DEPLOY_ZIP=1
-          LOCALE_DEFAULT="${{ inputs.locale }}"
+          LOCALE_DEFAULT="fr_FR.UTF-8"
           TARGET_HOSTNAME="${{ inputs.hostname }}"
-          KEYBOARD_KEYMAP="${{ inputs.locale == 'fr_FR.UTF-8' && 'fr' || 'gb' }}"
-          KEYBOARD_LAYOUT="${{ inputs.locale == 'fr_FR.UTF-8' && 'French' || 'English' }}"
-          TIMEZONE_DEFAULT="${{ inputs.timezone }}"
+          KEYBOARD_KEYMAP="fr"
+          KEYBOARD_LAYOUT="French"
+          TIMEZONE_DEFAULT="Europe/Paris"
           FIRST_USER_NAME="${{ inputs.username }}"
           FIRST_USER_PASS="${{ inputs.password }}"
           ENABLE_SSH=1
-          STAGE_LIST="${{ inputs.stage_list }}"
-          ARCH="${{ inputs.architecture }}"
+          STAGE_LIST="stage0 stage1 stage2"
+          ARCH="arm64"
           INSTALL_DEV_PACKAGES="${{ inputs.install_dev_packages }}"
+          USE_QEMU=${{ inputs.use_qemu }}
           WPA_ESSID="${{ inputs.wifi_ssid }}"
           WPA_PASSWORD="${{ inputs.wifi_password }}"
           WPA_COUNTRY="${{ inputs.wifi_country }}"
@@ -182,7 +168,7 @@ jobs:
       - name: Create artifact name
         id: artifact
         run: |
-          ARTIFACT_NAME="biomi-os-${{ inputs.release }}-${{ inputs.architecture }}"
+          ARTIFACT_NAME="biomi-os-${{ inputs.release }}"
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload Image
