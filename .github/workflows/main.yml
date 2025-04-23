@@ -36,6 +36,10 @@ on:
         required: true
         default: 'raspberrypi'
         type: string
+      public_key:
+        description: 'SSH Public Key'
+        required: false
+        type: string
       username:
         description: 'Default username'
         required: true
@@ -102,6 +106,7 @@ jobs:
           USE_QEMU=${{ inputs.use_qemu }}
           WPA_ESSID="${{ inputs.wifi_ssid }}"
           WPA_PASSWORD="${{ inputs.wifi_password }}"
+          PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
           EOF
 
       - name: Configure WiFi
