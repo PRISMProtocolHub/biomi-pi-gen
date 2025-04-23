@@ -94,19 +94,15 @@ jobs:
           mkdir -p ${GITHUB_WORKSPACE}/custom/00-packages
           echo "${{ inputs.custom_packages }}" | tr ' ' '\n' > ${GITHUB_WORKSPACE}/custom/00-packages/00-packages
 
-      - name: Set release name
-        id: release_name
-        run: |
-          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
-            echo "RELEASE_NAME=${{ inputs.release }}-dev" >> $GITHUB_ENV
-          else
-            echo "RELEASE_NAME=${{ inputs.release }}" >> $GITHUB_ENV
-          fi
-
       - name: Create config file
         run: |
+          RELEASE_NAME=${{ inputs.release }}
+          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
+            RELEASE_NAME=${{ inputs.release }}-dev
+          fi
+          
           cat > ${GITHUB_WORKSPACE}/config << EOF
-          IMG_NAME="${{ steps.release_name.outputs.RELEASE_NAME }}"
+          IMG_NAME="${RELEASE_NAME}"
           RELEASE="${{ inputs.release }}"
           DEPLOY_ZIP=1
           LOCALE_DEFAULT="fr_FR.UTF-8"
