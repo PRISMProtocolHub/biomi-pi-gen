@@ -65,7 +65,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: debian-latest
 
     steps:
       - name: Checkout code
@@ -76,6 +76,13 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          apt-get install coreutils quilt parted qemu-user-static debootstrap zerofree zip \
+          dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc \
+          gpg pigz xxd arch-test bmap-tools
 
       - name: Create build directory
         run: mkdir -p ${GITHUB_WORKSPACE}/deploy
@@ -103,7 +110,7 @@ jobs:
           STAGE_LIST="stage0 stage1 stage2"
           ARCH="arm64"
           INSTALL_DEV_PACKAGES="${{ inputs.install_dev_packages }}"
-          USE_QEMU=${{ inputs.use_qemu }}
+          USE_QEMU="${{ inputs.use_qemu }}"
           WPA_ESSID="${{ inputs.wifi_ssid }}"
           WPA_PASSWORD="${{ inputs.wifi_password }}"
           PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
