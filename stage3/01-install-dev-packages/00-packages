@@ -5,3 +5,4 @@ libcap-dev
 libkms++-dev
 libfmt-dev
 libdrm-dev
+pipx
