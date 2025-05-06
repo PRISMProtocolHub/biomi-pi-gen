@@ -1,0 +1,8 @@
+libatlas-base-dev
+libopencv-dev
+libbluetooth-dev
+libcap-dev
+libkms++-dev
+libfmt-dev
+libdrm-dev
+pipx
