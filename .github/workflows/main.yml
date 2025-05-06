@@ -104,7 +104,7 @@ jobs:
           FIRST_USER_NAME="${{ inputs.username }}"
           FIRST_USER_PASS="${{ inputs.password }}"
           ENABLE_SSH=1
-          STAGE_LIST="stage0 stage1 stage2"
+          STAGE_LIST="stage0 stage1 stage2 stage3"
           ARCH="arm64"
           INSTALL_DEV_PACKAGES="${{ inputs.install_dev_packages }}"
           USE_QEMU="${{ inputs.use_qemu }}"
