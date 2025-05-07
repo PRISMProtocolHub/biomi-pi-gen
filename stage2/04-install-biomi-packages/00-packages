@@ -6,5 +6,4 @@ bluetooth
 python3-bluez
 python3-libcamera
 python3-kms++
-python3-venv
 redis
