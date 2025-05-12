@@ -22,6 +22,14 @@ on:
         options:
           - '0'
           - '1'
+      build_docker:
+        description: 'Build matching Docker image'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
       hostname:
         description: 'Hostname for the image'
         required: true
@@ -110,6 +118,73 @@ jobs:
         env:
           CONTINUE: 1
           PRESERVE_CONTAINER: 0
+
+      - name: Prepare Docker image
+        if: "${{ inputs.build_docker == '1 ' }}"
+        run: |
+          ZIP_PATH=$(find deploy -name "*.zip" | head -n 1)
+
+          # Install tools to extract image
+          sudo apt-get install -y kpartx qemu-user-static unzip
+          
+          # Unzip
+          mkdir -p extracted
+          unzip "$ZIP_PATH" -d extracted
+        
+          # Find uncompressed image
+          IMAGE_PATH=$(find extracted -name "*.img" | head -n 1)
+
+          # Mount image
+          sudo mkdir -p /mnt/raspberrypi
+          LOOP_DEVICE=$(sudo kpartx -av "$IMAGE_PATH" | cut -d' ' -f3 | head -n 1)
+          sudo mount "/dev/mapper/${LOOP_DEVICE}p2" /mnt/raspberrypi
+
+          # Create filesystem archive
+          sudo tar -czvf rootfs.tar.gz -C /mnt/raspberrypi .
+
+          # Cleanup mount
+          sudo umount /mnt/raspberrypi
+          sudo kpartx -d "$IMAGE_PATH"
+
+      - name: Create docker file
+        run: |
+          cat > Dockerfile << EOF
+          FROM scratch
+
+          # Copy root file system
+          ADD rootfs.tar.gz /
+
+          # Configure environment
+          ENV DEBIAN_FRONTEND=noninteractive
+          ENV LC_ALL=C.UTF-8
+          ENV LANG=C.UTF-8
+
+          # Install development tools
+          RUN apt-get update && apt-get install -y \
+              python3 \
+              python3-pip \
+              build-essential \
+              git \
+              curl \
+              wget \
+              && rm -rf /var/lib/apt/lists/*
+
+          # Define working directory
+          WORKDIR /app
+
+          # Default entrypoint 
+          CMD ["/bin/bash"]
+          EOF
+
+      - name: Build and push docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/arm/v7
+          push: true
+          tags: |
+            ghcr.io/prismprotocolhub/biomi-pi-gen:bullseye-latest
+            ghcr.io/prismprotocolhub/biomi-pi-gen:bullseye-${{ github.sha }}
 
       - name: Create artifact name
         id: artifact
