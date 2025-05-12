@@ -45,10 +45,12 @@ on:
         description: 'WiFi SSID (network name)'
         required: false
         type: string
+        default: ''
       wifi_password:
         description: 'WiFi Password'
         required: false
         type: string
+        default: ''
       custom_packages:
         description: 'Additional packages to install (space-separated)'
         required: false
@@ -166,6 +168,13 @@ jobs:
         id: artifact
         run: |
           ARTIFACT_NAME="biomi-os-bullseye"
+          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME=}-dev"
+          fi
+          
+          if [ "${{ inputs.use_qemu }}" == "1" ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME=}-qemu"
+          fi
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload Image
