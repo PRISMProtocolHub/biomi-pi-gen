@@ -109,6 +109,8 @@ jobs:
           USE_QEMU="${{ inputs.use_qemu }}"
           PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
           EOF
+          
+          cat ${GITHUB_WORKSPACE}/config 
 
       - name: Build Image
         run: |
@@ -120,7 +122,7 @@ jobs:
           PRESERVE_CONTAINER: 0
 
       - name: Prepare Docker image
-        if: "${{ inputs.build_docker == '1 ' }}"
+        if: "${{ inputs.build_docker == '1' }}"
         run: |
           ZIP_PATH=$(find deploy -name "*.zip" | head -n 1)
 
@@ -147,7 +149,7 @@ jobs:
           sudo kpartx -d "$IMAGE_PATH"
 
       - name: Create docker file
-        if: "${{ inputs.build_docker == '1 ' }}"
+        if: "${{ inputs.build_docker == '1' }}"
         run: |
           cat > Dockerfile << EOF
           FROM scratch
@@ -169,7 +171,7 @@ jobs:
           sudo rm rootfs.tar.gzs
 
       - name: Build and push docker image
-        if: "${{ inputs.build_docker == '1 ' }}"
+        if: "${{ inputs.build_docker == '1' }}"
         uses: docker/build-push-action@v3
         with:
           context: .
