@@ -128,16 +128,16 @@ jobs:
           sudo apt-get install -y kpartx qemu-user-static unzip
           
           # Unzip
-          mkdir -p extracted
-          unzip "$ZIP_PATH" -d extracted
+          unzip "$ZIP_PATH" -d deploy
         
           # Find uncompressed image
-          IMAGE_PATH=$(find extracted -name "*.img" | head -n 1)
+          IMAGE_PATH=$(find deploy -name "*.img" | head -n 1)
 
           # Mount image
           sudo mkdir -p /mnt/raspberrypi
-          LOOP_DEVICE=$(sudo kpartx -av "$IMAGE_PATH" | cut -d' ' -f3 | head -n 1)
-          sudo mount "/dev/mapper/${LOOP_DEVICE}p2" /mnt/raspberrypi
+          LOOP_DEVICE=$(sudo losetup --find --show "$IMAGE_PATH")
+          sudo partprobe "$LOOP_DEVICE"
+          sudo mount "${LOOP_DEVICE}p2" /mnt/raspberrypi
 
           # Create filesystem archive
           sudo tar -czvf rootfs.tar.gz -C /mnt/raspberrypi .
@@ -147,9 +147,12 @@ jobs:
           sudo kpartx -d "$IMAGE_PATH"
 
       - name: Create docker file
+        if: "${{ inputs.build_docker == '1 ' }}"
         run: |
           cat > Dockerfile << EOF
           FROM scratch
+          
+          COPY --from=multiarch/qemu-user-static:register /usr/bin/qemu-arm-static /usr/bin/
 
           # Copy root file system
           ADD rootfs.tar.gz /
@@ -159,24 +162,14 @@ jobs:
           ENV LC_ALL=C.UTF-8
           ENV LANG=C.UTF-8
 
-          # Install development tools
-          RUN apt-get update && apt-get install -y \
-              python3 \
-              python3-pip \
-              build-essential \
-              git \
-              curl \
-              wget \
-              && rm -rf /var/lib/apt/lists/*
-
-          # Define working directory
-          WORKDIR /app
-
           # Default entrypoint 
           CMD ["/bin/bash"]
           EOF
+          
+          sudo rm rootfs.tar.gzs
 
       - name: Build and push docker image
+        if: "${{ inputs.build_docker == '1 ' }}"
         uses: docker/build-push-action@v3
         with:
           context: .
