@@ -6,14 +6,19 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      install_dev_packages:
-        description: 'Install development packages'
+      release:
+        description: 'Release'
         required: true
-        default: '0'
+        default: 'bullseye'
         type: choice
         options:
-          - '0'
-          - '1'
+          - 'bullseye'
+          - 'bookworm'
+      stages_list:
+        description: 'Custom Stages list'
+        required: false
+        default: ''
+        type: string
       use_qemu:
         description: 'Use QEMU compatibility for emulation'
         required: true
@@ -86,15 +91,10 @@ jobs:
 
       - name: Create config file
         run: |
-          RELEASE_NAME="bullseye"
-          STAGE_LIST="stage0 stage1 stage2"
-          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
-            RELEASE_NAME="${RELEASE_NAME}-dev"
-            STAGE_LIST="${STAGE_LIST} development-env-stage"
-          fi
+          IMG_NAME="biomi-${{ inputs.release }}"
           
           cat > ${GITHUB_WORKSPACE}/config << EOF
-          IMG_NAME="${RELEASE_NAME}"
+          IMG_NAME="${IMG_NAME}"
           RELEASE="${{ inputs.release }}"
           DEPLOY_ZIP=1
           LOCALE_DEFAULT="fr_FR.UTF-8"
@@ -105,12 +105,15 @@ jobs:
           FIRST_USER_NAME="${{ inputs.username }}"
           FIRST_USER_PASS="${{ inputs.password }}"
           ENABLE_SSH=1
-          STAGE_LIST="${STAGE_LIST}"
           USE_QEMU="${{ inputs.use_qemu }}"
           PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
           EOF
           
-          cat ${GITHUB_WORKSPACE}/config 
+          if [[ "${{ inputs.stages_list }}" != "" ]]; then
+            cat > ${GITHUB_WORKSPACE}/config << EOF
+            STAGE_LIST="${{ inputs.stages_list }}"
+            EOF
+          fi
 
       - name: Build Image
         run: |
