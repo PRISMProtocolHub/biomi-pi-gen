@@ -1,0 +1,13 @@
+python3-pip
+python3-pyqt5
+blueman
+bluez
+bluez-tools
+bluetooth
+pigpio python-pigpio python3-pigpio
+pulseaudio-module-bluetooth
+python3-bluez
+python3-libcamera
+python3-kms++
+redis
+sqlite3

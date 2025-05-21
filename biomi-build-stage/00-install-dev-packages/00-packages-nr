@@ -1,0 +1,11 @@
+libatlas-base-dev
+libopencv-dev
+libbluetooth-dev
+libcap-dev
+libkms++-dev
+libfmt-dev
+libdrm-dev
+libffi-dev
+python3-pip
+python3-venv
+pipx
