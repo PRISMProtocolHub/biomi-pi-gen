@@ -6,11 +6,6 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      stages_list:
-        description: 'Custom Stages list'
-        required: false
-        default: ''
-        type: string
       use_qemu:
         description: 'Use QEMU compatibility for emulation'
         required: true
@@ -31,10 +26,6 @@ on:
         description: 'Hostname for the image'
         required: true
         default: 'raspberrypi'
-        type: string
-      public_key:
-        description: 'SSH Public Key'
-        required: false
         type: string
       username:
         description: 'Default username'
@@ -96,14 +87,7 @@ jobs:
           FIRST_USER_PASS="${{ inputs.password }}"
           ENABLE_SSH=1
           USE_QEMU="${{ inputs.use_qemu }}"
-          PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
           EOF
-          
-          if [[ "${{ inputs.stages_list }}" != "" ]]; then
-            cat > ${GITHUB_WORKSPACE}/config << EOF
-            STAGE_LIST="${{ inputs.stages_list }}"
-            EOF
-          fi
 
       - name: Build Image
         run: |
