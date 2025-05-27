@@ -17,7 +17,7 @@ if [ "$_IP" ]; then
   printf "My IP address is %s\n" "$_IP"
 fi
 
-sudo bluetoothctl <<EOF
+bluetoothctl <<EOF
 power on
 discoverable on
 pairable on
