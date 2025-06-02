@@ -6,16 +6,16 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      install_dev_packages:
-        description: 'Install development packages'
+      use_qemu:
+        description: 'Use QEMU compatibility for emulation'
         required: true
         default: '0'
         type: choice
         options:
           - '0'
           - '1'
-      use_qemu:
-        description: 'Use QEMU compatibility for emulation'
+      build_docker:
+        description: 'Build matching Docker image'
         required: true
         default: '0'
         type: choice
@@ -27,10 +27,6 @@ on:
         required: true
         default: 'raspberrypi'
         type: string
-      public_key:
-        description: 'SSH Public Key'
-        required: false
-        type: string
       username:
         description: 'Default username'
         required: true
@@ -40,14 +36,6 @@ on:
         description: 'Default password'
         required: true
         default: 'raspberry'
-        type: string
-      wifi_ssid:
-        description: 'WiFi SSID (network name)'
-        required: false
-        type: string
-      wifi_password:
-        description: 'WiFi Password'
-        required: false
         type: string
       custom_packages:
         description: 'Additional packages to install (space-separated)'
@@ -87,14 +75,9 @@ jobs:
 
       - name: Create config file
         run: |
-          RELEASE_NAME="bullseye"
-          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
-            RELEASE_NAME="bullseye-dev"
-          fi
-          
           cat > ${GITHUB_WORKSPACE}/config << EOF
-          IMG_NAME="${RELEASE_NAME}"
-          RELEASE="${{ inputs.release }}"
+          IMG_NAME="biomi-bullseye-arm64"
+          RELEASE="bullseye"
           DEPLOY_ZIP=1
           LOCALE_DEFAULT="fr_FR.UTF-8"
           TARGET_HOSTNAME="${{ inputs.hostname }}"
@@ -104,55 +87,8 @@ jobs:
           FIRST_USER_NAME="${{ inputs.username }}"
           FIRST_USER_PASS="${{ inputs.password }}"
           ENABLE_SSH=1
-          STAGE_LIST="stage0 stage1 stage2 stage3"
-          ARCH="arm64"
-          INSTALL_DEV_PACKAGES="${{ inputs.install_dev_packages }}"
           USE_QEMU="${{ inputs.use_qemu }}"
-          WPA_ESSID="${{ inputs.wifi_ssid }}"
-          WPA_PASSWORD="${{ inputs.wifi_password }}"
-          PUBKEY_SSH_FIRST_USER="${{ inputs.public_key }}"
           EOF
-
-      - name: Configure WiFi
-        if: "${{ inputs.wifi_ssid != '' && inputs.wifi_password != '' }}"
-        run: |
-          mkdir -p ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/files/etc/wpa_supplicant
-          cat > ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/files/etc/wpa_supplicant/wpa_supplicant.conf << EOF
-          ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-          update_config=1
-          country=${{ env.wifi_country }}
-          
-          network={
-            ssid="${{ inputs.wifi_ssid }}"
-            psk="${{ inputs.wifi_password }}"
-            key_mgmt=WPA-PSK
-          }
-          EOF
-          
-          # Create run script to copy WPA config if it doesn't exist
-          mkdir -p ${GITHUB_WORKSPACE}/stage2/02-net-tweaks
-          cat > ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/01-run.sh << 'EOF'
-          #!/bin/bash -e
-          
-          install -m 644 files/etc/wpa_supplicant/wpa_supplicant.conf "${ROOTFS_DIR}/etc/wpa_supplicant/"
-          
-          on_chroot << EOT
-          # Enable WiFi on boot
-          systemctl enable wpa_supplicant.service
-          
-          # Configure country code
-          if [ -e /etc/default/crda ]; then
-            sed -i "s/^REGDOMAIN=.*/REGDOMAIN=${{ env.wifi_country }}/" /etc/default/crda
-          fi
-          
-          # Enable WiFi on boot (for bookworm and newer)
-          if [ -e /etc/default/raspi-firmware ]; then
-            sed -i "s/^#WIRELESS_REGDOM=.*/WIRELESS_REGDOM=${{ env.wifi_country }}/" /etc/default/raspi-firmware
-          fi
-          EOT
-          EOF
-          
-          chmod +x ${GITHUB_WORKSPACE}/stage2/02-net-tweaks/01-run.sh
 
       - name: Build Image
         run: |
@@ -163,10 +99,77 @@ jobs:
           CONTINUE: 1
           PRESERVE_CONTAINER: 0
 
+      - name: Prepare Docker image
+        if: "${{ inputs.build_docker == '1' }}"
+        run: |
+          ZIP_PATH=$(find deploy -name "*.zip" | head -n 1)
+
+          # Install tools to extract image
+          sudo apt-get install -y kpartx qemu-user-static unzip
+          
+          # Unzip
+          unzip "$ZIP_PATH" -d deploy
+        
+          # Find uncompressed image
+          IMAGE_PATH=$(find deploy -name "*.img" | head -n 1)
+
+          # Mount image
+          sudo mkdir -p /mnt/raspberrypi
+          LOOP_DEVICE=$(sudo losetup --find --show "$IMAGE_PATH")
+          sudo partprobe "$LOOP_DEVICE"
+          sudo mount "${LOOP_DEVICE}p2" /mnt/raspberrypi
+
+          # Create filesystem archive
+          sudo tar -czvf rootfs.tar.gz -C /mnt/raspberrypi .
+
+          # Cleanup mount
+          sudo umount /mnt/raspberrypi
+          sudo kpartx -d "$IMAGE_PATH"
+
+      - name: Create docker file
+        if: "${{ inputs.build_docker == '1' }}"
+        run: |
+          cat > Dockerfile << EOF
+          FROM scratch
+          
+          COPY --from=multiarch/qemu-user-static:register /usr/bin/qemu-arm-static /usr/bin/
+
+          # Copy root file system
+          ADD rootfs.tar.gz /
+
+          # Configure environment
+          ENV DEBIAN_FRONTEND=noninteractive
+          ENV LC_ALL=C.UTF-8
+          ENV LANG=C.UTF-8
+
+          # Default entrypoint 
+          CMD ["/bin/bash"]
+          EOF
+          
+          sudo rm rootfs.tar.gzs
+
+      - name: Build and push docker image
+        if: "${{ inputs.build_docker == '1' }}"
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/arm/v7
+          push: true
+          tags: |
+            ghcr.io/prismprotocolhub/biomi-pi-gen:bullseye-arm64-latest
+            ghcr.io/prismprotocolhub/biomi-pi-gen:bullseye-arm64-${{ github.sha }}
+
       - name: Create artifact name
         id: artifact
         run: |
-          ARTIFACT_NAME="biomi-os-bullseye-arm64"
+          ARTIFACT_NAME="biomi-os-bullseye"
+          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME=}-dev"
+          fi
+          
+          if [ "${{ inputs.use_qemu }}" == "1" ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME=}-qemu"
+          fi
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload Image
