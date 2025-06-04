@@ -55,7 +55,7 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Install dependencies
         run: |
@@ -108,11 +108,11 @@ jobs:
             echo "Error: No ZIP file found in deploy/"
             exit 1
           fi
-          
-          # Install tools to extract image
+
+          # Install tools to extract image (sudo required for package installation)
           sudo apt-get update
           sudo apt-get install -y kpartx qemu-user-static unzip
-          
+
           # Unzip
           unzip "$ZIP_PATH" -d deploy
 
@@ -123,24 +123,24 @@ jobs:
             echo "Error: No .img file found after extraction"
             exit 1
           fi
-          
-          # Mount image
+
+          # Mount image (sudo required for system operations)
           sudo mkdir -p /mnt/raspberrypi
           LOOP_DEVICE=$(sudo losetup --find --show "$IMAGE_PATH")
-          
+
           # Wait for partitions to be available
           sleep 2
           sudo partprobe "$LOOP_DEVICE"
           sleep 2
-          
+
           # Check that partition exists
           if [ ! -e "${LOOP_DEVICE}p2" ]; then
             echo "Error: Partition ${LOOP_DEVICE}p2 not found"
             sudo losetup -d "$LOOP_DEVICE"
             exit 1
           fi
-          
-          # Mount rootfs partition (usually p2)
+
+          # Mount rootfs partition (sudo required for mount operations)
           sudo mount "${LOOP_DEVICE}p2" /mnt/raspberrypi
 
           # Check that mount succeeded
@@ -149,17 +149,17 @@ jobs:
             sudo losetup -d "$LOOP_DEVICE"
             exit 1
           fi
-          
-          # Create filesystem archive
+
+          # Create filesystem archive (sudo required to read all files as root)
           sudo tar -czf rootfs.tar.gz -C /mnt/raspberrypi .
-          
+
           # Check that archive was created
           if [ ! -f "rootfs.tar.gz" ]; then
             echo "Error: Failed to create rootfs archive"
             exit 1
           fi
 
-          # Cleanup mount
+          # Cleanup mount (sudo required for unmount and loop device cleanup)
           sudo umount /mnt/raspberrypi
           sudo losetup -d "$LOOP_DEVICE"
 
@@ -168,9 +168,6 @@ jobs:
         run: |
           cat > Dockerfile << EOF
           FROM scratch
-          
-          # Copy QEMU static for ARM emulation
-          COPY --from=multiarch/qemu-user-static:register /usr/bin/qemu-arm-static /usr/bin/
 
           # Copy root file system
           ADD rootfs.tar.gz /
@@ -189,14 +186,14 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          platforms: linux/arm/v7
+          platforms: linux/arm/v8
           push: true
           tags: |
             ghcr.io/prismprotocolhub/biomi-pi-gen:bullseye-arm64-latest
             ghcr.io/prismprotocolhub/biomi-pi-gen:bullseye-arm64-${{ github.sha }}
           # Add buildx driver for multi-platform
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+#          cache-from: type=gha
+#          cache-to: type=gha,mode=max
 
       - name: Create artifact name
         id: artifact
