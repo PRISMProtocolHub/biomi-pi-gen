@@ -4,6 +4,7 @@ mkvtoolnix
 python3-picamera2
 python3-pip
 python3-pyqt5
+libdbus-glib-1-2
 blueman
 bluez
 bluez-tools
