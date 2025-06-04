@@ -198,6 +198,7 @@ jobs:
       - name: Create artifact name
         id: artifact
         run: |
+          DATE=$(date +'%Y-%m-%d')
           ARTIFACT_NAME="biomi-os-bullseye"
           if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
             ARTIFACT_NAME="${ARTIFACT_NAME=}-dev"
@@ -207,6 +208,7 @@ jobs:
             ARTIFACT_NAME="${ARTIFACT_NAME=}-qemu"
           fi
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
@@ -221,7 +223,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.artifact.outputs.name }}
-          name: ${{ steps.artifact.outputs.name }}
+          name: ${{ steps.artifact.outputs.name }}-${{ steps.artifact.outputs.date }}
           draft: false
           prerelease: false
           files: deploy/*.zip
