@@ -97,7 +97,7 @@ jobs:
       - name: Build Image
         run: |
           sudo modprobe loop
-          docker pull debian:bookworkm
+          docker pull debian:bookworm
           DOCKER_BUILDKIT=1 ./build-docker.sh
         env:
           CONTINUE: 1
