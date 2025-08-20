@@ -9,7 +9,7 @@ blueman
 bluez
 bluez-tools
 bluetooth
-pigpio python-pigpio python3-pigpio
+pigpio python3-pigpio
 pulseaudio-module-bluetooth
 python3-bluez
 python3-libcamera
