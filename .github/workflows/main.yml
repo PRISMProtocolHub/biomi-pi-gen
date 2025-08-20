@@ -1,0 +1,257 @@
+name: BIOMI-OS-IMAGE-BUILDER
+
+env:
+  wifi_country: "FR"
+
+permissions:
+  contents: write
+  packages: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_qemu:
+        description: 'Use QEMU compatibility for emulation'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+      build_docker:
+        description: 'Build matching Docker image'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+      hostname:
+        description: 'Hostname for the image'
+        required: true
+        default: 'raspberrypi'
+        type: string
+      username:
+        description: 'Default username'
+        required: true
+        default: 'pi'
+        type: string
+      password:
+        description: 'Default password'
+        required: true
+        default: 'raspberry'
+        type: string
+      custom_packages:
+        description: 'Additional packages to install (space-separated)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on:
+      labels: arm64-runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install coreutils quilt parted qemu-user-static debootstrap zerofree zip \
+          dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc \
+          gpg pigz xxd arch-test bmap-tools
+
+      - name: Create build directory
+        run: mkdir -p ${GITHUB_WORKSPACE}/deploy
+
+      - name: Create custom package list
+        if: "${{ inputs.custom_packages != '' }}"
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/custom/00-packages
+          echo "${{ inputs.custom_packages }}" | tr ' ' '\n' > ${GITHUB_WORKSPACE}/custom/00-packages/00-packages
+
+      - name: Create config file
+        run: |
+          cat > ${GITHUB_WORKSPACE}/config << EOF
+          IMG_NAME="biomi-bookworm-arm64"
+          RELEASE="bookworm"
+          DEPLOY_ZIP=1
+          LOCALE_DEFAULT="fr_FR.UTF-8"
+          TARGET_HOSTNAME="${{ inputs.hostname }}"
+          KEYBOARD_KEYMAP="fr"
+          KEYBOARD_LAYOUT="French"
+          TIMEZONE_DEFAULT="Europe/Paris"
+          FIRST_USER_NAME="${{ inputs.username }}"
+          FIRST_USER_PASS="${{ inputs.password }}"
+          ENABLE_SSH=1
+          USE_QEMU="${{ inputs.use_qemu }}"
+          EOF
+
+      - name: Build Image
+        run: |
+          sudo modprobe loop
+          docker pull debian:bookworkm
+          DOCKER_BUILDKIT=1 ./build-docker.sh
+        env:
+          CONTINUE: 1
+          PRESERVE_CONTAINER: 0
+
+      - name: Prepare Docker image
+        if: "${{ inputs.build_docker == '1' }}"
+        run: |
+          ZIP_PATH=$(find deploy -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_PATH" ]; then
+            echo "Error: No ZIP file found in deploy/"
+            exit 1
+          fi
+
+          # Install tools to extract image (sudo required for package installation)
+          sudo apt-get update
+          sudo apt-get install -y kpartx qemu-user-static unzip
+
+          # Unzip
+          unzip "$ZIP_PATH" -d deploy
+
+          # Find uncompressed image
+          IMAGE_PATH=$(find deploy -name "*.img" | head -n 1)
+
+          if [ -z "$IMAGE_PATH" ]; then
+            echo "Error: No .img file found after extraction"
+            exit 1
+          fi
+
+          # Mount image (sudo required for system operations)
+          sudo mkdir -p /mnt/raspberrypi
+          LOOP_DEVICE=$(sudo losetup --find --show "$IMAGE_PATH")
+
+          # Wait for partitions to be available
+          sleep 2
+          sudo partprobe "$LOOP_DEVICE"
+          sleep 2
+
+          # Check that partition exists
+          if [ ! -e "${LOOP_DEVICE}p2" ]; then
+            echo "Error: Partition ${LOOP_DEVICE}p2 not found"
+            sudo losetup -d "$LOOP_DEVICE"
+            exit 1
+          fi
+
+          # Mount rootfs partition (sudo required for mount operations)
+          sudo mount "${LOOP_DEVICE}p2" /mnt/raspberrypi
+
+          # Check that mount succeeded
+          if ! mountpoint -q /mnt/raspberrypi; then
+            echo "Error: Failed to mount partition"
+            sudo losetup -d "$LOOP_DEVICE"
+            exit 1
+          fi
+
+          # Create filesystem archive (sudo required to read all files as root)
+          sudo tar -czf rootfs.tar.gz -C /mnt/raspberrypi .
+
+          # Check that archive was created
+          if [ ! -f "rootfs.tar.gz" ]; then
+            echo "Error: Failed to create rootfs archive"
+            exit 1
+          fi
+
+          # Cleanup mount (sudo required for unmount and loop device cleanup)
+          sudo umount /mnt/raspberrypi
+          sudo losetup -d "$LOOP_DEVICE"
+
+      - name: Create docker file
+        if: "${{ inputs.build_docker == '1' }}"
+        run: |
+          cat > Dockerfile << EOF
+          FROM scratch
+
+          # Copy root file system
+          ADD rootfs.tar.gz /
+
+          # Configure environment
+          ENV container=docker
+          ENV DEBIAN_FRONTEND=noninteractive
+          ENV LC_ALL=C.UTF-8
+          ENV LANG=C.UTF-8
+          
+          # Remove Docker incompatible services
+          RUN systemctl mask \
+              dev-hugepages.mount \
+              sys-fs-fuse-connections.mount \
+              systemd-udevd \
+              systemd-udevd-kernel.socket \
+              systemd-udevd-control.socket
+
+          # Default entrypoint 
+          CMD ["/bin/bash"]
+          EOF
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push docker image
+        if: "${{ inputs.build_docker == '1' }}"
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/arm/v8
+          push: true
+          tags: |
+            ghcr.io/prismprotocolhub/biomi-pi-gen:bookworm-arm64-latest
+            ghcr.io/prismprotocolhub/biomi-pi-gen:bookworm-arm64-${{ github.sha }}
+          # Add buildx driver for multi-platform
+#          cache-from: type=gha
+#          cache-to: type=gha,mode=max
+
+      - name: Create artifact name
+        id: artifact
+        run: |
+          DATE=$(date +'%Y-%m-%d')
+          ARTIFACT_NAME="biomi-os-bookworm"
+          if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME=}-dev"
+          fi
+          
+          if [ "${{ inputs.use_qemu }}" == "1" ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME=}-qemu"
+          fi
+          echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: deploy/*.zip
+          retention-days: 7
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.artifact.outputs.name }}
+          name: ${{ steps.artifact.outputs.name }}-${{ steps.artifact.outputs.date }}
+          draft: false
+          prerelease: false
+          files: deploy/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo rm -rf work
+          sudo rm -rf deploy
