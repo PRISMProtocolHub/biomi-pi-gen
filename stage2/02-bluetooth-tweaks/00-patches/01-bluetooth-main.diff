@@ -1,0 +1,20 @@
+--- jessie-stage2.orig/rootfs/etc/bluetooth/main.conf
++++ jessie-stage2/rootfs/etc/bluetooth/main.conf
+@@ -12,7 +12,7 @@
+ # How long to stay in discoverable mode before going back to non-discoverable
+ # The value is in seconds. Default is 180, i.e. 3 minutes.
+ # 0 = disable timer, i.e. stay discoverable forever
+-#DiscoverableTimeout = 0
++DiscoverableTimeout = 0
+
+ # Always allow pairing even if there are no agent registered
+ # Possible values: true, false
+@@ -22,7 +22,7 @@
+ # How long to stay in pairable mode before going back to non-discoverable
+ # The value is in seconds. Default is 0.
+ # 0 = disable timer, i.e. stay pairable forever
+-#PairableTimeout = 0
++PairableTimeout = 0
+
+ # Use vendor id source (assigner), vendor, product and version information for
+ # DID profile support. The values are separated by ":" and assigner, VID, PID
