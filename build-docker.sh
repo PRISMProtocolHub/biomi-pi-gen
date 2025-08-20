@@ -83,15 +83,15 @@ fi
 BUILD_OPTS="$(echo "${BUILD_OPTS:-}" | sed -E 's@\-c\s?([^ ]+)@-c /config@')"
 
 # Check the arch of the machine we're running on. If it's 64-bit, use a 32-bit base image instead
-case "$(uname -m)" in
-  x86_64|aarch64)
-    BASE_IMAGE=i386/debian:trixie
-    ;;
-  *)
-    BASE_IMAGE=debian:trixie
-    ;;
-esac
-${DOCKER} build --build-arg BASE_IMAGE=${BASE_IMAGE} -t pi-gen "${DIR}"
+#case "$(uname -m)" in
+#  x86_64|aarch64)
+#    BASE_IMAGE=i386/debian:trixie
+#    ;;
+#  *)
+#    BASE_IMAGE=debian:trixie
+#    ;;
+#esac
+${DOCKER} build --build-arg BASE_IMAGE=debian:trixie -t pi-gen "${DIR}"
 
 if [ "${CONTAINER_EXISTS}" != "" ]; then
   DOCKER_CMDLINE_NAME="${CONTAINER_NAME}_cont"
