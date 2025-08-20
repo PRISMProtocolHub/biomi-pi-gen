@@ -68,6 +68,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/arm64,linux/amd64
 
       - name: Install dependencies
         run: |
@@ -106,10 +108,14 @@ jobs:
         run: |
           sudo modprobe loop
           docker pull debian:latest
-          DOCKER_BUILDKIT=1 ./build-docker.sh
+          ./build-docker.sh
         env:
           CONTINUE: 1
+          DOCKER_BUILDKIT: 1
           PRESERVE_CONTAINER: 0
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+          BASE_IMAGE: debian:bookworm
+
 
       - name: Prepare Docker image
         if: "${{ inputs.build_docker == '1' }}"
@@ -216,7 +222,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .
-          platforms: linux/arm/v8
+          platforms: linux/arm64
           push: true
           tags: |
             ghcr.io/prismprotocolhub/biomi-pi-gen:${{ inputs.release }}-latest
