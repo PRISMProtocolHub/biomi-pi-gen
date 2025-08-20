@@ -3,6 +3,10 @@ name: BIOMI-OS-IMAGE-BUILDER
 env:
   wifi_country: "FR"
 
+permissions:
+  contents: write
+  packages: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -52,7 +56,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on:
+      labels: arm64-runner
 
     steps:
       - name: Checkout code
@@ -62,7 +67,7 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Install dependencies
         run: |
@@ -111,27 +116,64 @@ jobs:
         run: |
           ZIP_PATH=$(find deploy -name "*.zip" | head -n 1)
 
-          # Install tools to extract image
+          if [ -z "$ZIP_PATH" ]; then
+            echo "Error: No ZIP file found in deploy/"
+            exit 1
+          fi
+
+          # Install tools to extract image (sudo required for package installation)
+          sudo apt-get update
           sudo apt-get install -y kpartx qemu-user-static unzip
-          
+
           # Unzip
           unzip "$ZIP_PATH" -d deploy
-        
+
           # Find uncompressed image
           IMAGE_PATH=$(find deploy -name "*.img" | head -n 1)
 
-          # Mount image
+          if [ -z "$IMAGE_PATH" ]; then
+            echo "Error: No .img file found after extraction"
+            exit 1
+          fi
+
+          # Mount image (sudo required for system operations)
           sudo mkdir -p /mnt/raspberrypi
           LOOP_DEVICE=$(sudo losetup --find --show "$IMAGE_PATH")
+
+          # Wait for partitions to be available
+          sleep 2
           sudo partprobe "$LOOP_DEVICE"
+          sleep 2
+
+          # Check that partition exists
+          if [ ! -e "${LOOP_DEVICE}p2" ]; then
+            echo "Error: Partition ${LOOP_DEVICE}p2 not found"
+            sudo losetup -d "$LOOP_DEVICE"
+            exit 1
+          fi
+
+          # Mount rootfs partition (sudo required for mount operations)
           sudo mount "${LOOP_DEVICE}p2" /mnt/raspberrypi
 
-          # Create filesystem archive
-          sudo tar -czvf rootfs.tar.gz -C /mnt/raspberrypi .
+          # Check that mount succeeded
+          if ! mountpoint -q /mnt/raspberrypi; then
+            echo "Error: Failed to mount partition"
+            sudo losetup -d "$LOOP_DEVICE"
+            exit 1
+          fi
 
-          # Cleanup mount
+          # Create filesystem archive (sudo required to read all files as root)
+          sudo tar -czf rootfs.tar.gz -C /mnt/raspberrypi .
+
+          # Check that archive was created
+          if [ ! -f "rootfs.tar.gz" ]; then
+            echo "Error: Failed to create rootfs archive"
+            exit 1
+          fi
+
+          # Cleanup mount (sudo required for unmount and loop device cleanup)
           sudo umount /mnt/raspberrypi
-          sudo kpartx -d "$IMAGE_PATH"
+          sudo losetup -d "$LOOP_DEVICE"
 
       - name: Create docker file
         if: "${{ inputs.build_docker == '1' }}"
@@ -145,22 +187,36 @@ jobs:
           ADD rootfs.tar.gz /
 
           # Configure environment
+          ENV container=docker
           ENV DEBIAN_FRONTEND=noninteractive
           ENV LC_ALL=C.UTF-8
           ENV LANG=C.UTF-8
+          
+          # Remove Docker incompatible services
+          RUN systemctl mask \
+              dev-hugepages.mount \
+              sys-fs-fuse-connections.mount \
+              systemd-udevd \
+              systemd-udevd-kernel.socket \
+              systemd-udevd-control.socket
 
           # Default entrypoint 
           CMD ["/bin/bash"]
           EOF
-          
-          sudo rm rootfs.tar.gzs
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push docker image
         if: "${{ inputs.build_docker == '1' }}"
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: .
-          platforms: linux/arm/v7
+          platforms: linux/arm/v8
           push: true
           tags: |
             ghcr.io/prismprotocolhub/biomi-pi-gen:${{ inputs.release }}-latest
@@ -169,6 +225,7 @@ jobs:
       - name: Create artifact name
         id: artifact
         run: |
+          DATE=$(date +'%Y-%m-%d')
           ARTIFACT_NAME="biomi-os-${{ inputs.release }}"
           if [[ "${{ inputs.install_dev_packages }}" == "1" ]]; then
             ARTIFACT_NAME="${ARTIFACT_NAME=}-dev"
@@ -178,6 +235,7 @@ jobs:
             ARTIFACT_NAME="${ARTIFACT_NAME=}-qemu"
           fi
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
@@ -192,7 +250,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.artifact.outputs.name }}
-          name: ${{ steps.artifact.outputs.name }}
+          name: ${{ steps.artifact.outputs.name }}-${{ steps.artifact.outputs.date }}
           draft: false
           prerelease: false
           files: deploy/*.zip
