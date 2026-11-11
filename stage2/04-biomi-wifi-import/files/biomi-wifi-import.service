@@ -1,0 +1,22 @@
+[Unit]
+Description=Import the Wi-Fi network written by Raspberry Pi Imager into NetworkManager
+# Imager < 1.7.3 only writes wpa_supplicant.conf, which NetworkManager ignores.
+ConditionPathExists=/etc/wpa_supplicant/wpa_supplicant.conf
+DefaultDependencies=no
+After=local-fs.target
+Before=NetworkManager.service network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/biomi-wifi-import
+ProtectSystem=strict
+ReadWritePaths=/etc/NetworkManager/system-connections /etc/wpa_supplicant
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
