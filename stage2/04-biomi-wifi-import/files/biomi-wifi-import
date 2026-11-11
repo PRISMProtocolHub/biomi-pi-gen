@@ -1,0 +1,178 @@
+#!/bin/bash -e
+# Converts the first network block of wpa_supplicant.conf (written by Raspberry
+# Pi Imager < 1.7.3) into a NetworkManager keyfile, then deletes the source (it
+# holds the key in clear) so this runs once. Imager >= 1.7.3 writes preconfigured.nmconnection itself: any
+# existing Wi-Fi profile means there is nothing to do. Runs before
+# NetworkManager starts, so nmcli is unavailable and the keyfile is written
+# directly. Anything it cannot convert safely is logged and skipped (fail closed).
+
+WPA_CONF=/etc/wpa_supplicant/wpa_supplicant.conf
+NM_DIR=/etc/NetworkManager/system-connections
+NM_RUN_DIR=/run/NetworkManager/system-connections
+PROFILE="${NM_DIR}/imported-wifi.nmconnection"
+
+export LC_ALL=C
+
+log() {
+	echo "biomi-wifi-import: $*" >&2
+}
+
+# Removing or renaming the source makes the unit's ConditionPathExists false from
+# now on, so a profile deleted later is not recreated. A refused file is kept,
+# readable by root only, for diagnosis.
+skip() {
+	log "$* - no profile written"
+	chmod 600 "${WPA_CONF}"
+	mv "${WPA_CONF}" "${WPA_CONF}.skipped"
+	exit 0
+}
+
+if grep -qsxE 'type=(wifi|802-11-wireless)' "${NM_DIR}"/*.nmconnection "${NM_RUN_DIR}"/*.nmconnection; then
+	skip "a Wi-Fi profile already exists"
+fi
+
+# Prints KEY<TAB>VALUE for each line of the first network={...} block. Quotes
+# are kept on values; a '}' or '#' inside quotes neither closes the block nor
+# starts a comment. CRs are dropped.
+parse_first_network() {
+	tr -d '\r' < "${WPA_CONF}" | awk '
+		function emit(line,   eq) {
+			sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line)
+			eq = index(line, "=")
+			if (eq > 1) printf "%s\t%s\n", substr(line, 1, eq - 1), substr(line, eq + 1)
+		}
+		{
+			if (done) next
+			if (!inblock) {
+				if ($0 ~ /^[ \t]*network[ \t]*=[ \t]*\{[ \t]*$/) inblock = 1
+				next
+			}
+			quoted = 0; out = ""
+			for (i = 1; i <= length($0); i++) {
+				c = substr($0, i, 1)
+				if (c == "\"") quoted = !quoted
+				else if (!quoted && c == "#") break
+				else if (!quoted && c == "}") { done = 1; break }
+				out = out c
+			}
+			emit(out)
+		}
+		END { if (!done) exit 1 }'
+}
+
+if ! block="$(parse_first_network)"; then
+	skip "no complete network block in ${WPA_CONF}"
+fi
+
+duplicate_key="$(printf '%s\n' "${block}" | cut -f1 | sort | uniq -d | head -n1)"
+if [ -n "${duplicate_key}" ]; then
+	skip "key ${duplicate_key} appears twice in the network block"
+fi
+
+value_of() {
+	printf '%s\n' "${block}" | awk -F '\t' -v k="$1" '$1 == k { sub(/^[^\t]*\t/, ""); print; exit }'
+}
+
+# Decodes a wpa_supplicant string: "text" literally, otherwise hex bytes.
+# Refuses control bytes (they cannot be written to a keyfile) and invalid UTF-8.
+decode() {
+	local raw="$1" text
+	case "${raw}" in
+		\"*\")
+			text="${raw#\"}"; text="${text%\"}"
+			;;
+		*)
+			if ! [[ "${raw}" =~ ^([0-9a-fA-F]{2})+$ ]]; then
+				return 1
+			fi
+			if printf '%s' "${raw}" | grep -qiE '^(..)*(0[0-9a-f]|1[0-9a-f]|7f)'; then
+				return 1
+			fi
+			text="$(printf '%b' "$(printf '%s' "${raw}" | sed 's/../\\x&/g')")"
+			;;
+	esac
+	if printf '%s' "${text}" | grep -q '[[:cntrl:]]'; then
+		return 1
+	fi
+	if ! printf '%s' "${text}" | iconv -f UTF-8 -t UTF-8 > /dev/null 2>&1; then
+		return 1
+	fi
+	printf '%s' "${text}"
+}
+
+# GKeyFile value escaping: backslash first, then a leading space.
+keyfile_escape() {
+	local value="${1//\\/\\\\}"
+	if [ "${value:0:1}" = " " ]; then
+		value="\\s${value:1}"
+	fi
+	printf '%s' "${value}"
+}
+
+raw_ssid="$(value_of ssid)"
+if [ -z "${raw_ssid}" ]; then
+	skip "network block has no ssid"
+fi
+if ! ssid="$(decode "${raw_ssid}")" || [ -z "${ssid}" ]; then
+	skip "ssid has control bytes, invalid hex or invalid UTF-8"
+fi
+
+key_mgmt="$(value_of key_mgmt)"
+raw_psk="$(value_of psk)"
+psk=""
+case "${key_mgmt}" in
+	NONE)
+		if printf '%s\n' "${block}" | cut -f1 | grep -q '^wep_key'; then
+			skip "WEP network"
+		fi
+		;;
+	WPA-PSK | "")
+		if [ -z "${raw_psk}" ]; then
+			skip "key_mgmt ${key_mgmt:-unset} without a psk"
+		fi
+		case "${raw_psk}" in
+			\"*\")
+				if ! psk="$(decode "${raw_psk}")"; then
+					skip "psk has control bytes or invalid UTF-8"
+				fi
+				;;
+			*)
+				# The 64-hex derived key: NetworkManager takes it as is.
+				if ! [[ "${raw_psk}" =~ ^[0-9a-fA-F]{64}$ ]]; then
+					skip "psk is neither quoted nor a 64-hex key"
+				fi
+				psk="${raw_psk}"
+				;;
+		esac
+		;;
+	*)
+		skip "unsupported key_mgmt ${key_mgmt}"
+		;;
+esac
+
+hidden=""
+if [ "$(value_of scan_ssid)" = "1" ]; then
+	hidden="hidden=true"$'\n'
+fi
+
+ssid_escaped="$(keyfile_escape "${ssid}")"
+umask 077
+tmp="$(mktemp "${NM_DIR}/.imported-wifi.XXXXXX")"
+# A run stopped before the mv leaves no PSK copy behind.
+trap 'rm -f "${tmp}"' EXIT
+{
+	printf '[connection]\nid=%s\ntype=wifi\nautoconnect=true\n\n' "${ssid_escaped}"
+	printf '[wifi]\nmode=infrastructure\nssid=%s\n%s\n' "${ssid_escaped}" "${hidden}"
+	if [ -n "${psk}" ]; then
+		printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$(keyfile_escape "${psk}")"
+	fi
+	printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n'
+} > "${tmp}"
+chmod 600 "${tmp}"
+# On disk before the source goes: ext4 can commit the rename and the unlink before the
+# data, and a power cut on first boot would leave an empty profile and no source.
+sync "${tmp}"
+mv "${tmp}" "${PROFILE}"
+sync "${NM_DIR}"
+rm "${WPA_CONF}"
+log "imported Wi-Fi network into ${PROFILE}"
