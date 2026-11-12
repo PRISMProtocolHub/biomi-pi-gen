@@ -1,0 +1,18 @@
+# Camera stack embedded in the biomi-firmware binary. The binary carries its own
+# libcamera, which loads the IPA modules of the system: both must be the same
+# build or the camera crashes (PRISM-149). These are the versions of
+# ghcr.io/prismprotocolhub/biomi-firmware-builder:1.0.0 (its /var/lib/dpkg/status)
+# and change only together with it, and with files/biomi-camera.sha256.
+# The repository index only lists the latest version: 00-run.sh installs these
+# from the pool, and this file keeps a later apt upgrade from moving them.
+Package: libcamera0.5 libcamera-ipa python3-libcamera
+Pin: version 0.5.1+rpt20250722-1
+Pin-Priority: 1001
+
+Package: python3-picamera2
+Pin: version 0.3.30-1
+Pin-Priority: 1001
+
+Package: librpicam-app1 rpicam-apps-core rpicam-apps-lite
+Pin: version 1.8.1-1~bookworm
+Pin-Priority: 1001
