@@ -16,3 +16,8 @@ Pin-Priority: 1001
 Package: librpicam-app1 rpicam-apps-core rpicam-apps-lite
 Pin: version 1.8.1-1~bookworm
 Pin-Priority: 1001
+
+# The PiSP library embedded with libcamera reads its configuration from libpisp-common.
+Package: libpisp1 libpisp-common
+Pin: version 1.2.1-1
+Pin-Priority: 1001

@@ -5,3 +5,5 @@ ab1e7b62ae2e6477520b478fc9e95e38644d8f2814bfb1760dfa81bacf4ac358  p/picamera2/py
 938dc105d72781333ed14808ddb0e5707bc4a2c14818cee9799ba5c80f9e5bb3  r/rpicam-apps/librpicam-app1_1.8.1-1~bookworm_arm64.deb
 e4b64e77c57788df6247e01bec679829b571b9e96bed31b0437b355298a6ea40  r/rpicam-apps/rpicam-apps-core_1.8.1-1~bookworm_arm64.deb
 b17e35580e207d7e31645a2a75f7f8f6db7e46513831deec647a07604ca98e71  r/rpicam-apps/rpicam-apps-lite_1.8.1-1~bookworm_all.deb
+4bf86c4f8d656decbf0e15c916fba4d9023c20917a0ebba1efbd1f744b973f7d  libp/libpisp/libpisp1_1.2.1-1_arm64.deb
+ed2eb6af3360913db30c60cb8ec7e98a35a92b80a4d1e165174d13526bd63d51  libp/libpisp/libpisp-common_1.2.1-1_all.deb
