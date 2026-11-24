@@ -9,6 +9,80 @@ Raspberry Pi OS 64 bit images are based primarily on Debian.
 **Note**: 32 bit images should be built from the `master` branch.
 64 bit images should be built from the `arm64` branch.
 
+## Biomi: flashing an image with Raspberry Pi Imager
+
+The CI image is generic: it contains no Wi-Fi credentials or SSH keys. Those are
+set per device at flash time with [Raspberry Pi Imager](https://www.raspberrypi.com/software/)'s
+customisation screen (Wi-Fi, country, hostname, user/password, SSH key, locale).
+
+Imager 2.x only offers customisation for images that declare support for it, which a
+local `.img` opened with *Use custom* does not. Each GitHub release therefore ships an
+`os_list.json` (an Imager repository describing the image, with `init_format`
+`systemd` for Bullseye/Bookworm and `cloudinit-rpi` for Trixie).
+
+### From a GitHub release
+
+```bash
+rpi-imager --repo https://github.com/PRISMProtocolHub/biomi-pi-gen/releases/download/biomi-os-bookworm/os_list.json
+```
+
+Replace `biomi-os-bookworm` with the release tag you want (`biomi-os-trixie`,
+`biomi-os-bullseye`, ...). The repository can also be loaded from Imager's
+application options instead of `--repo`.
+
+Then:
+
+1. **Device**: pick the board family (*Raspberry Pi 4* for a CM4, *Raspberry Pi Zero 2 W*
+   / *Raspberry Pi 3* for a Zero 2 W).
+2. **OS**: pick *Biomi OS ...* from the list.
+3. **Customisation**: fill in Wi-Fi (SSID, password, **country**), SSH public key, etc.
+   Locale, keyboard (`fr`) and timezone (`Europe/Paris`) are already set in the image.
+
+The customisation is applied on first boot (`/boot/firmware/firstrun.sh` on Bookworm,
+deleted once it has run).
+
+### From a local image
+
+To flash an image you already downloaded, create an `os_list.json` next to it and
+point `url` to the local file (`file:///...`, percent-encode non-ASCII characters):
+
+```bash
+IMG=2026-11-12-biomi-bookworm-arm64-lite.img
+cat > os_list.json << EOF
+{
+  "os_list": [{
+    "name": "Biomi OS Bookworm arm64 (local)",
+    "description": "Local Biomi image",
+    "url": "file://$(realpath "$IMG")",
+    "extract_size": $(stat -c%s "$IMG"),
+    "extract_sha256": "$(sha256sum "$IMG" | cut -d' ' -f1)",
+    "image_download_size": $(stat -c%s "$IMG"),
+    "image_download_sha256": "$(sha256sum "$IMG" | cut -d' ' -f1)",
+    "release_date": "$(date +%F)",
+    "init_format": "systemd",
+    "devices": ["pi5-64bit", "pi4-64bit", "pi3-64bit"]
+  }]
+}
+EOF
+rpi-imager --repo "$(realpath os_list.json)"
+```
+
+If Imager refuses the `file://` URL, serve the directory over HTTP
+(`python3 -m http.server 8000`) and use `http://localhost:8000/<image>` instead.
+If the image does not show up after selecting a device, remove the `devices` line.
+
+### Compute Module 4 (eMMC)
+
+A CM4 with eMMC has no SD card: the eMMC must first be exposed as a USB mass storage
+device with [`rpiboot`](https://github.com/raspberrypi/usbboot):
+
+1. Fit the *disable eMMC boot* jumper (J2 on the CM4 IO board) and connect the
+   USB slave port to the computer.
+2. Run `sudo rpiboot`; the eMMC appears as `/dev/sdX`.
+3. Flash with Imager as above, then remove the jumper and power-cycle.
+
+CM4 *Lite* modules boot from the carrier board's SD card and are flashed like any SD card.
+
 ## Dependencies
 
 pi-gen runs on Debian-based operating systems released after 2017, and we

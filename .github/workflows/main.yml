@@ -239,6 +239,57 @@ jobs:
           echo "name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
           echo "date=$DATE" >> $GITHUB_OUTPUT
 
+      - name: Generate rpi-imager repository (os_list.json)
+        if: "${{ inputs.use_qemu == '0' }}"
+        run: |
+          command -v unzip > /dev/null || { sudo apt-get update && sudo apt-get install -y unzip; }
+
+          ZIP_PATH=$(find deploy -maxdepth 1 -name "*.zip" | head -n 1)
+          if [ -z "$ZIP_PATH" ]; then
+            echo "Error: No ZIP file found in deploy/"
+            exit 1
+          fi
+          ZIP_NAME=$(basename "$ZIP_PATH")
+          IMG_IN_ZIP=$(unzip -Z1 "$ZIP_PATH" | grep '\.img$' | head -n 1)
+
+          # Size and checksum of the uncompressed image (streamed, no temp file)
+          EXTRACT_SIZE=$(unzip -Zl "$ZIP_PATH" "$IMG_IN_ZIP" | awk '{print $4}')
+          EXTRACT_SHA256=$(unzip -p "$ZIP_PATH" "$IMG_IN_ZIP" | sha256sum | cut -d' ' -f1)
+          DOWNLOAD_SIZE=$(stat -c%s "$ZIP_PATH")
+          DOWNLOAD_SHA256=$(sha256sum "$ZIP_PATH" | cut -d' ' -f1)
+
+          # Bullseye/Bookworm are customised through firstrun.sh, Trixie through cloud-init
+          case "${{ inputs.release }}" in
+            trixie) INIT_FORMAT="cloudinit-rpi" ;;
+            *)      INIT_FORMAT="systemd" ;;
+          esac
+
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.artifact.outputs.name }}/${ZIP_NAME}"
+
+          cat > deploy/os_list.json << EOF
+          {
+            "os_list": [
+              {
+                "name": "Biomi OS ${{ inputs.release }} arm64 (${{ steps.artifact.outputs.date }})",
+                "description": "Biomi pi-gen image - ${{ inputs.release }} 64-bit lite (commit ${{ github.sha }})",
+                "url": "${URL}",
+                "extract_size": ${EXTRACT_SIZE},
+                "extract_sha256": "${EXTRACT_SHA256}",
+                "image_download_size": ${DOWNLOAD_SIZE},
+                "image_download_sha256": "${DOWNLOAD_SHA256}",
+                "release_date": "${{ steps.artifact.outputs.date }}",
+                "init_format": "${INIT_FORMAT}",
+                "devices": ["pi5-64bit", "pi4-64bit", "pi3-64bit"]
+              }
+            ]
+          }
+          EOF
+
+          if command -v python3 > /dev/null; then
+            python3 -m json.tool deploy/os_list.json > /dev/null
+          fi
+          cat deploy/os_list.json
+
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
@@ -255,7 +306,9 @@ jobs:
           name: ${{ steps.artifact.outputs.name }}-${{ steps.artifact.outputs.date }}
           draft: false
           prerelease: false
-          files: deploy/*.zip
+          files: |
+            deploy/*.zip
+            deploy/os_list.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
